@@ -3,8 +3,26 @@ name = "rfd"
 version = "0.17.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "SPIKE-ONLY iOS stub for rfd 0.17 (upstream has no iOS backend). All dialogs immediately pick nothing."
+description = "SPIKE-ONLY iOS backing for rfd 0.17 (upstream has no iOS backend)."
 
 [features]
 default = []
 file-handle-inner = []
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSString",
+    "NSArray",
+    "NSURL",
+    "NSObject",
+    "NSObjCRuntime",
+] }
+objc2-ui-kit = { version = "0.3", features = [
+    "UIDocumentPickerViewController",
+    "UIDocumentPickerDelegate",
+    "UIDocumentPickerMode",
+    "UIApplication",
+    "UIViewController",
+    "UIWindow",
+] }
