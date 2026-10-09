@@ -1,0 +1,74 @@
+name: ios-ipa
+on:
+  workflow_dispatch: {}
+jobs:
+  build-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: Build pdfcraft for iOS (debug)
+        run: cargo build -p pdfcraft --target aarch64-apple-ios
+      - name: Package unsigned IPA
+        run: |
+          set -euxo pipefail
+          BIN=target/aarch64-apple-ios/debug/pdfcraft
+          test -f "$BIN"
+          file "$BIN"
+          rm -rf ipa-staging PdfCraft-unsigned.ipa
+          mkdir -p ipa-staging/Payload/PdfCraft.app
+          cp "$BIN" ipa-staging/Payload/PdfCraft.app/PdfCraft
+          cat > ipa-staging/Payload/PdfCraft.app/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleIdentifier</key>
+            <string>com.surfrpt1.pdfcraft</string>
+            <key>CFBundleExecutable</key>
+            <string>PdfCraft</string>
+            <key>CFBundleName</key>
+            <string>PdfCraft</string>
+            <key>CFBundleDisplayName</key>
+            <string>PdfCraft</string>
+            <key>CFBundleVersion</key>
+            <string>0.4.0</string>
+            <key>CFBundleShortVersionString</key>
+            <string>0.4.0</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>MinimumOSVersion</key>
+            <string>17.0</string>
+            <key>UIDeviceFamily</key>
+            <array>
+              <integer>1</integer>
+              <integer>2</integer>
+            </array>
+            <key>UIRequiredDeviceCapabilities</key>
+            <array>
+              <string>arm64</string>
+              <string>metal</string>
+            </array>
+            <key>UISupportedInterfaceOrientations</key>
+            <array>
+              <string>UIInterfaceOrientationPortrait</string>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+              <string>UIInterfaceOrientationPortraitUpsideDown</string>
+            </array>
+            <key>UILaunchScreen</key>
+            <dict/>
+          </dict>
+          </plist>
+          EOF
+          codesign --force --sign - ipa-staging/Payload/PdfCraft.app/PdfCraft || true
+          (cd ipa-staging && zip -qry ../PdfCraft-unsigned.ipa Payload)
+          ls -la PdfCraft-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PdfCraft-unsigned.ipa
+          path: PdfCraft-unsigned.ipa
