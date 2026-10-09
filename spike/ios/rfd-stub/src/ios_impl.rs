@@ -21,7 +21,7 @@ use objc2::{define_class, msg_send, ClassType, MainThreadMarker, MainThreadOnly}
 use objc2_foundation::{NSArray, NSMutableArray, NSObject, NSString, NSURL};
 use objc2_ui_kit::{
     UIApplication, UIDocumentPickerDelegate, UIDocumentPickerMode,
-    UIDocumentPickerViewController, UIViewController,
+    UIDocumentPickerViewController, UIViewController, UIWindow,
 };
 
 struct Shared {
@@ -90,21 +90,42 @@ define_class!(
 );
 
 /// Present an Import-mode picker (`public.item`: everything importable).
-/// Runs on the calling (UI) thread. Returns false when there is no main
-/// thread or no window; the caller then behaves as dismissed.
+/// Runs on the calling (UI) thread. On failure returns a reason slug which
+/// becomes a fake path, so the app surfaces it in its own "Couldn't read …"
+/// toast instead of failing silently (remote-debugging aid for sideloaded
+/// builds where we cannot see logs).
 #[allow(deprecated)]
-fn present_import(multiple: bool, shared: &SharedCell) -> bool {
+fn present_import(multiple: bool, shared: &SharedCell) -> Result<(), &'static str> {
     let Some(mtm) = MainThreadMarker::new() else {
-        return false;
+        return Err("no-main-thread");
     };
     let app = UIApplication::sharedApplication(mtm);
-    let window = match app.keyWindow() {
+    // `keyWindow` is scene-deprecated and often nil (e.g. under app hosts);
+    // fall back to any key window, then any window at all.
+    let window: Retained<UIWindow> = match app.keyWindow() {
         Some(w) => w,
-        None => return false,
+        None => {
+            let windows = app.windows();
+            let mut found: Option<Retained<UIWindow>> = None;
+            for i in 0..windows.len() {
+                let w = windows.objectAtIndex(i);
+                if w.isKeyWindow() {
+                    found = Some(w);
+                    break;
+                }
+                if found.is_none() {
+                    found = Some(w);
+                }
+            }
+            match found {
+                Some(w) => w,
+                None => return Err("no-window"),
+            }
+        }
     };
     let root: Retained<UIViewController> = match window.rootViewController() {
         Some(r) => r,
-        None => return false,
+        None => return Err("no-root-vc"),
     };
     let types = NSMutableArray::<NSString>::new();
     types.addObject(&NSString::from_str("public.item"));
@@ -119,7 +140,7 @@ fn present_import(multiple: bool, shared: &SharedCell) -> bool {
     let raw = Retained::into_raw(delegate) as usize;
     pending().lock().unwrap().insert(raw, shared.clone());
     root.presentViewController_animated_completion(&picker, true, None);
-    true
+    Ok(())
 }
 
 pub(super) struct PickFuture {
@@ -161,17 +182,18 @@ impl PickFuture {
 }
 
 /// Called synchronously on the UI thread. Presents the picker now and hands
-/// back a future the worker thread will drive to completion.
+/// back a future the worker thread will drive to completion. A presentation
+/// failure resolves to a sentinel path so the app toasts the reason instead
+/// of failing silently.
 pub(super) fn pick_now(multiple: bool) -> PickFuture {
     let shared: SharedCell = std::sync::Arc::new(Mutex::new(Shared {
         done: None,
         waker: None,
     }));
-    if present_import(multiple, &shared) {
-        PickFuture {
+    match present_import(multiple, &shared) {
+        Ok(()) => PickFuture {
             shared: Some(shared),
-        }
-    } else {
-        PickFuture::ready(Vec::new())
+        },
+        Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
 }
