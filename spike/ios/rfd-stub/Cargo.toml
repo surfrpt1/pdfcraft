@@ -1,0 +1,10 @@
+[package]
+name = "rfd"
+version = "0.17.2"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SPIKE-ONLY iOS stub for rfd 0.17 (upstream has no iOS backend). All dialogs immediately pick nothing."
+
+[features]
+default = []
+file-handle-inner = []

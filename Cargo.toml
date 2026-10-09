@@ -86,7 +86,9 @@ lto = "thin"
 codegen-units = 1
 
 # Vendored, patched third-party crates (see vendor/README.md). Each patch is meant to go upstream.
+# SPIKE-ONLY (iOS experiment, do not merge): rfd has no iOS backend, swapped for a no-op stub.
 [patch.crates-io]
+rfd = { path = "spike/ios/rfd-stub" }
 hayro-interpret = { path = "vendor/hayro-interpret" }
 hayro = { path = "vendor/hayro" }
 hayro-syntax = { path = "vendor/hayro-syntax" }
