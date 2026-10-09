@@ -1,5 +1,10 @@
 //! iOS backing for the `rfd` stub: real `UIDocumentPickerViewController` import
 //! flow plus sandboxed-Documents fallbacks for folder/save panels.
+//!
+//! The delegate class carries no state: pending picks live in a global map
+//! keyed by delegate address (plain `usize`, so the map stays `Send`), and
+//! the delegate itself is retained manually with `into_raw` / `from_raw`
+//! because `setDelegate` is weak.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -56,9 +61,10 @@ struct Shared {
     presented: bool,
     done: Option<Vec<PathBuf>>,
     waker: Option<Waker>,
-    // Kept alive until the delegate callback runs (`setDelegate` is weak).
-    _delegate: Option<Retained<PickerDelegate>>,
-    _picker: Option<Retained<UIDocumentPickerViewController>>,
+    /// Manually-retained delegate (`setDelegate` is weak). Released in the
+    /// callback via `from_raw`; a dropped-without-callback future leaks one
+    /// tiny object, which is harmless.
+    delegate_raw: usize,
 }
 
 type SharedCell = std::sync::Arc<Mutex<Shared>>;
@@ -71,6 +77,7 @@ fn pending() -> &'static Mutex<HashMap<usize, SharedCell>> {
 
 define_class!(
     #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
     #[name = "PdfCraftPickerDelegate"]
     struct PickerDelegate;
 
@@ -95,6 +102,8 @@ define_class!(
                         }
                     }
                 }
+                // Balance the manual retain from presentation.
+                unsafe { drop(Retained::<PickerDelegate>::from_raw(key as *mut PickerDelegate)) };
                 let mut s = shared.lock().unwrap();
                 s.done = Some(paths);
                 if let Some(w) = s.waker.take() {
@@ -107,6 +116,7 @@ define_class!(
         fn documentPickerWasCancelled(&self, _controller: &UIDocumentPickerViewController) {
             let key = self as *const Self as usize;
             if let Some(shared) = pending().lock().unwrap().remove(&key) {
+                unsafe { drop(Retained::<PickerDelegate>::from_raw(key as *mut PickerDelegate)) };
                 let mut s = shared.lock().unwrap();
                 s.done = Some(Vec::new());
                 if let Some(w) = s.waker.take() {
@@ -118,13 +128,15 @@ define_class!(
 );
 
 /// Present an Import-mode picker (`public.item`: everything importable) and
-/// resolve with the sandbox copies. Must run on the main thread; `false`
-/// means "could not present, behave as dismissed".
+/// arrange for the delegate callback to complete `shared`. Returns false when
+/// not on the main thread or when UIKit has no window (caller then behaves
+/// as dismissed, matching the old stub).
+#[allow(deprecated)]
 fn present_import(multiple: bool, shared: &SharedCell) -> bool {
-    let Some(_mtm) = MainThreadMarker::new() else {
+    let Some(mtm) = MainThreadMarker::new() else {
         return false;
     };
-    let app = UIApplication::sharedApplication(_mtm);
+    let app = UIApplication::sharedApplication(mtm);
     let window = match app.keyWindow() {
         Some(w) => w,
         None => return false,
@@ -142,19 +154,17 @@ fn present_import(multiple: bool, shared: &SharedCell) -> bool {
     );
     picker.setAllowsMultipleSelection(multiple);
     let delegate: Retained<PickerDelegate> = unsafe { msg_send![PickerDelegate::class(), new] };
-    picker.setDelegate(Some(ProtocolObject::from_ref(&delegate)));
+    let delegate_ref: &PickerDelegate = &delegate;
+    picker.setDelegate(Some(ProtocolObject::from_ref(delegate_ref)));
+    let raw = Retained::into_raw(delegate) as usize;
     {
+        let mut map = pending().lock().unwrap();
+        map.insert(raw, shared.clone());
         let mut s = shared.lock().unwrap();
-        s._delegate = Some(delegate);
-        s._picker = Some(picker.clone());
+        s.delegate_raw = raw;
     }
     root.presentViewController_animated_completion(&picker, true, None);
     true
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn register(shared: SharedCell, delegate_key: usize) {
-    pending().lock().unwrap().insert(delegate_key, shared);
 }
 
 struct PickFuture {
@@ -172,24 +182,14 @@ impl Future for PickFuture {
         }
         if !s.presented {
             s.presented = true;
-            // Pre-register under a stable key before presenting: the delegate
-            // looks the future up by its own address. Register under the
-            // shared cell's address instead, then hand the delegate the same
-            // key via a side channel.
-            let key = std::sync::Arc::as_ptr(&self.shared) as usize;
             drop(s);
-            register(self.shared.clone(), key);
             if !present_import(self.multiple, &self.shared) {
-                pending().lock().unwrap().remove(&key);
                 let mut s = self.shared.lock().unwrap();
                 s.done = Some(Vec::new());
                 return Poll::Ready(Vec::new());
             }
-            // Re-key to the delegate's address once it exists.
             let mut s = self.shared.lock().unwrap();
             s.waker = Some(cx.waker().clone());
-            drop(s);
-            rekey_to_delegate(&self.shared, key);
             return Poll::Pending;
         }
         s.waker = Some(cx.waker().clone());
@@ -197,35 +197,12 @@ impl Future for PickFuture {
     }
 }
 
-/// Move the pending entry from the temporary cell-address key to the live
-/// delegate's address (what the callbacks actually see as `self`).
-fn rekey_to_delegate(shared: &SharedCell, old_key: usize) {
-    let delegate_addr = {
-        let s = shared.lock().unwrap();
-        match &s._delegate {
-            Some(d) => &**d as *const PickerDelegate as usize,
-            None => return,
-        }
-    };
-    if delegate_addr == old_key {
-        return;
-    }
-    let mut map = pending().lock().unwrap();
-    if let Some(cell) = map.remove(&old_key) {
-        map.insert(delegate_addr, cell);
-    }
-}
-
-pub(super) async fn pick(_files: bool, multiple: bool) -> Vec<PathBuf> {
+pub(super) async fn pick(multiple: bool) -> Vec<PathBuf> {
     let shared: SharedCell = std::sync::Arc::new(Mutex::new(Shared {
         presented: false,
         done: None,
         waker: None,
-        _delegate: None,
-        _picker: None,
+        delegate_raw: 0,
     }));
     PickFuture { shared, multiple }.await
 }
-
-#[allow(dead_code)]
-fn _use_file_handle(_h: FileHandle) {}

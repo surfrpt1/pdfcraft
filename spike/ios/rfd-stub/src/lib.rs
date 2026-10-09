@@ -49,11 +49,11 @@ impl AsyncFileDialog {
     }
 
     pub async fn pick_file(self) -> Option<FileHandle> {
-        pick(true, false).await.into_iter().next()
+        pick(false).await.into_iter().next().map(FileHandle::from_path)
     }
 
     pub async fn pick_files(self) -> Option<Vec<FileHandle>> {
-        let paths = pick(true, true).await;
+        let paths = pick(true).await;
         if paths.is_empty() {
             None
         } else {
@@ -135,7 +135,7 @@ impl FileHandle {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(target_os = "ios"))]
-async fn pick(_files: bool, _multiple: bool) -> Vec<PathBuf> {
+async fn pick(_multiple: bool) -> Vec<PathBuf> {
     Vec::new()
 }
 
