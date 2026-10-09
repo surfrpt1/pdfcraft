@@ -3,15 +3,23 @@
 //! Upstream `rfd` has no iOS backend. This crate is swapped in via
 //! `[patch.crates-io]` on the spike branch only.
 //!
-//! - Other targets: every dialog immediately resolves to "picked nothing"
-//!   (previous spike behavior, keeps `cargo check` green everywhere).
+//! IMPORTANT: pdfcraft creates the pick future on the UI thread but polls it
+//! on a worker thread (`pickers.rs`: "creating the future shows the panel").
+//! So like real `rfd`, presentation happens eagerly inside the (non-async)
+//! `pick_*` constructors, never on first poll.
+//!
+//! - Other targets: constructors resolve to "picked nothing".
 //! - iOS: file picking goes through `UIDocumentPickerViewController` in
 //!   Import mode (the system copies picks into the app sandbox, so no
 //!   security-scope juggling). Folder/save panels fall back to the app's
 //!   sandboxed Documents directory (visible in the Files app once the host
 //!   sets `UIFileSharingEnabled`).
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 /// Builder for an async file dialog. Settings are accepted; on iOS only the
 /// choice of `pick_*` decides what happens.
@@ -36,7 +44,7 @@ impl AsyncFileDialog {
     }
 
     pub fn set_file_name(self, file_name: impl Into<String>) -> Self {
-        Self::remember_name(file_name.into());
+        *SAVE_NAME.lock().unwrap() = Some(file_name.into());
         self
     }
 
@@ -48,49 +56,67 @@ impl AsyncFileDialog {
         self
     }
 
-    pub async fn pick_file(self) -> Option<FileHandle> {
-        pick(false).await.into_iter().next().map(FileHandle::from_path)
-    }
-
-    pub async fn pick_files(self) -> Option<Vec<FileHandle>> {
-        let paths = pick(true).await;
-        if paths.is_empty() {
-            None
-        } else {
-            Some(paths.into_iter().map(FileHandle::from_path).collect())
+    pub fn pick_file(self) -> impl Future<Output = Option<FileHandle>> {
+        let multiple = false;
+        async move {
+            #[cfg(target_os = "ios")]
+            {
+                return ios_impl::pick_now(multiple)
+                    .await
+                    .into_iter()
+                    .next()
+                    .map(FileHandle::from_path);
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
+                let _ = multiple;
+                None
+            }
         }
     }
 
-    pub async fn pick_folder(self) -> Option<FileHandle> {
-        sandbox_fallback_dir().map(FileHandle::from_path)
+    pub fn pick_files(self) -> impl Future<Output = Option<Vec<FileHandle>>> {
+        async move {
+            #[cfg(target_os = "ios")]
+            {
+                let paths = ios_impl::pick_now(true).await;
+                if paths.is_empty() {
+                    None
+                } else {
+                    Some(paths.into_iter().map(FileHandle::from_path).collect())
+                }
+            }
+            #[cfg(not(target_os = "ios"))]
+            {
+                None
+            }
+        }
     }
 
-    pub async fn pick_folders(self) -> Option<Vec<FileHandle>> {
-        sandbox_fallback_dir().map(|p| vec![FileHandle::from_path(p)])
+    pub fn pick_folder(self) -> impl Future<Output = Option<FileHandle>> {
+        async move { sandbox_fallback_dir().map(FileHandle::from_path) }
     }
 
-    pub async fn pick_file_or_folder(self) -> Option<FileHandle> {
-        self.pick_file().await
+    pub fn pick_folders(self) -> impl Future<Output = Option<Vec<FileHandle>>> {
+        async move { sandbox_fallback_dir().map(|p| vec![FileHandle::from_path(p)]) }
     }
 
-    pub async fn pick_files_or_folders(self) -> Option<Vec<FileHandle>> {
-        self.pick_files().await
+    pub fn pick_file_or_folder(self) -> impl Future<Output = Option<FileHandle>> {
+        self.pick_file()
     }
 
-    pub async fn save_file(self) -> Option<FileHandle> {
-        let name = take_name().unwrap_or_else(|| "document.pdf".to_string());
-        let mut path = sandbox_fallback_dir()?;
-        path.push(uniquify(&path, &name));
-        Some(FileHandle::from_path(path))
+    pub fn pick_files_or_folders(
+        self,
+    ) -> impl Future<Output = Option<Vec<FileHandle>>> {
+        self.pick_files()
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    fn remember_name(_name: String) {
-        // v1: the iOS picker flow ignores the suggested name for opens;
-        // saves read it back via `take_name`.
-        #[cfg(target_os = "ios")]
-        {
-            *SAVE_NAME.lock().unwrap() = Some(_name);
+    pub fn save_file(self) -> impl Future<Output = Option<FileHandle>> {
+        async move {
+            let name = take_name().unwrap_or_else(|| "document.pdf".to_string());
+            let mut path = sandbox_fallback_dir()?;
+            path.push(uniquify(&path, &name));
+            Some(FileHandle::from_path(path))
         }
     }
 }
@@ -130,36 +156,45 @@ impl FileHandle {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Non-iOS: dialogs resolve to "picked nothing" (check-only spike behavior).
-// ---------------------------------------------------------------------------
+static SAVE_NAME: Mutex<Option<String>> = Mutex::new(None);
 
-#[cfg(not(target_os = "ios"))]
-async fn pick(_multiple: bool) -> Vec<PathBuf> {
-    Vec::new()
-}
-
-#[cfg(not(target_os = "ios"))]
-fn sandbox_fallback_dir() -> Option<PathBuf> {
-    None
-}
-
-#[cfg(not(target_os = "ios"))]
 fn take_name() -> Option<String> {
-    None
+    SAVE_NAME.lock().unwrap().take()
 }
 
-#[cfg(not(target_os = "ios"))]
-fn uniquify(_dir: &Path, name: &str) -> String {
+/// Uniquified file name inside `dir` so saves never silently overwrite.
+fn uniquify(dir: &Path, name: &str) -> String {
+    if !dir.join(name).exists() {
+        return name.to_string();
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    for n in 2..1000 {
+        let candidate = format!("{stem} ({n}){ext}");
+        if !dir.join(&candidate).exists() {
+            return candidate;
+        }
+    }
     name.to_string()
 }
 
-// ---------------------------------------------------------------------------
-// iOS: real document picker + sandboxed Documents fallbacks.
-// ---------------------------------------------------------------------------
+/// App sandbox Documents directory (visible in Files with
+/// `UIFileSharingEnabled`). Created on demand.
+fn sandbox_fallback_dir() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let docs = PathBuf::from(home).join("Documents");
+    std::fs::create_dir_all(&docs).ok()?;
+    Some(docs)
+}
+
+/// Shared state between the eagerly-presented picker and the future polled
+/// later on a worker thread.
+struct WaitShared {
+    done: Mutex<Option<Vec<PathBuf>>>,
+    waker: Mutex<Option<Waker>>,
+}
 
 #[cfg(target_os = "ios")]
 mod ios_impl;
-
-#[cfg(target_os = "ios")]
-use ios_impl::{pick, sandbox_fallback_dir, take_name, uniquify, SAVE_NAME};
