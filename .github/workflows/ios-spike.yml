@@ -1,0 +1,15 @@
+name: ios-spike
+on:
+  workflow_dispatch: {}
+jobs:
+  check-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - name: Check pdfcraft for iOS
+        run: cargo check -p pdfcraft --target aarch64-apple-ios --message-format short 2>&1 | tail -n 100
