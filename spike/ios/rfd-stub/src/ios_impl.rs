@@ -15,7 +15,7 @@ use std::task::{Context, Poll, Waker};
 
 use objc2::rc::Retained;
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
-use objc2::{define_class, msg_send, ClassType, MainThreadMarker};
+use objc2::{define_class, msg_send, ClassType, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{NSArray, NSMutableArray, NSObject, NSString, NSURL};
 use objc2_ui_kit::{
     UIApplication, UIDocumentPickerDelegate, UIDocumentPickerMode,
@@ -154,8 +154,7 @@ fn present_import(multiple: bool, shared: &SharedCell) -> bool {
     );
     picker.setAllowsMultipleSelection(multiple);
     let delegate: Retained<PickerDelegate> = unsafe { msg_send![PickerDelegate::class(), new] };
-    let delegate_ref: &PickerDelegate = &delegate;
-    picker.setDelegate(Some(ProtocolObject::from_ref(delegate_ref)));
+    picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     let raw = Retained::into_raw(delegate) as usize;
     {
         let mut map = pending().lock().unwrap();
