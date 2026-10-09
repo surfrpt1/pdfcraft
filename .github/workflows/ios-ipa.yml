@@ -12,6 +12,9 @@ jobs:
           targets: aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
       - name: Build pdfcraft for iOS (debug)
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: '17.0'
+          RUSTFLAGS: -C link-arg=-miphoneos-version-min=17.0
         run: cargo build -p pdfcraft --target aarch64-apple-ios
       - name: Package unsigned IPA
         run: |
