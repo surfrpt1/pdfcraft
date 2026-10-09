@@ -148,7 +148,7 @@ fn present_import(multiple: bool, shared: &SharedCell) -> bool {
     let types = NSMutableArray::<NSString>::new();
     types.addObject(&NSString::from_str("public.item"));
     let picker = UIDocumentPickerViewController::initWithDocumentTypes_inMode(
-        UIDocumentPickerViewController::alloc(),
+        UIDocumentPickerViewController::alloc(mtm),
         &types,
         UIDocumentPickerMode::Import,
     );
