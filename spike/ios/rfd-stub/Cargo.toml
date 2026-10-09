@@ -20,8 +20,6 @@ objc2-foundation = { version = "0.3", features = [
 ] }
 objc2-ui-kit = { version = "0.3", features = [
     "UIDocumentPickerViewController",
-    "UIDocumentPickerDelegate",
-    "UIDocumentPickerMode",
     "UIApplication",
     "UIViewController",
     "UIWindow",
