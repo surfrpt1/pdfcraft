@@ -9,11 +9,9 @@
 //! `pick_*` constructors, never on first poll.
 //!
 //! - Other targets: constructors resolve to "picked nothing".
-//! - iOS: file picking goes through `UIDocumentPickerViewController` in
-//!   Import mode (the system copies picks into the app sandbox, so no
-//!   security-scope juggling). Folder/save panels fall back to the app's
-//!   sandboxed Documents directory (visible in the Files app once the host
-//!   sets `UIFileSharingEnabled`).
+//! - iOS: file picking goes through `UIDocumentPickerViewController` in Open
+//!   mode (files stay in place, access held) so Save writes back to the
+//!   original location; folder/save panels ask for a destination.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};

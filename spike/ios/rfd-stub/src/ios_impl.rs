@@ -1,5 +1,8 @@
-//! iOS backing for the `rfd` stub: real `UIDocumentPickerViewController` import
-//! flow.
+//! iOS backing for the `rfd` stub: real `UIDocumentPickerViewController` flows.
+//!
+//! Files open IN PLACE (Open mode, access held for the session) so Save
+//! writes back to the original location, like on desktop. Folder panels use
+//! Open mode too; save panels ask for a folder and append the file name.
 //!
 //! Presentation happens eagerly in [`pick_now`] (called on the UI thread,
 //! like real `rfd`); the returned future only waits for the delegate
@@ -223,12 +226,23 @@ fn new_shared() -> SharedCell {
 /// back a future the worker thread will drive to completion. A presentation
 /// failure resolves to a sentinel path so the app toasts the reason instead
 /// of failing silently.
+///
+/// Files open IN PLACE (Open mode, access held for the session) rather than
+/// imported as sandbox copies, so plain Save writes back to where the file
+/// came from - matching desktop behavior.
 pub(super) fn pick_now(multiple: bool) -> PickFuture {
     let shared = new_shared();
-    match present(&["public.item"], UIDocumentPickerMode::Import, multiple, &shared) {
-        Ok(()) => PickFuture { shared: Some(shared) },
+    {
+        let mut s = shared.lock().unwrap();
+        s.hold_access = true;
+    }
+    match present(&["public.item"], UIDocumentPickerMode::Open, multiple, &shared) {
+        Ok(()) => PickFuture {
+            shared: Some(shared),
+        },
         Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
+}
 }
 
 /// Folder picker (Open mode): destinations and library folders. Access is
