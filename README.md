@@ -41,16 +41,17 @@
 > spike (`spike/ios/`, `ios-spike`/`ios-ipa` workflows). If the ArtCraft team
 > ships official iOS support, use that instead.
 
-- **Download:** [releases](../../releases) (`PdfCraft-ios-*.ipa`, newest first).
+- **Download:** [releases](../../releases) — latest is **v1** (`PdfCraft-ios-v1.ipa`).
 - **Install:** sideload with AltStore/Sideloadly using your Apple ID (free
   7-day certificate). Bundle ID: `com.surfrpt1.pdfcraft`. Tested on iPad Air 5
   via LiveContainer.
-- **Works:** full app, native Files import picker, folder/save pickers, OCR
-  (models bundled), saves visible in the Files app, app icon, 1.3× touch pan
-  with momentum.
-- **Known spike limitations:** file dialogs are bridged natively but folder
-  access claims are held for the session; debug (not release) builds, so
-  slower than a final build would be; upstream updates need re-porting.
+- **Works:** full app, single-tap Files import with PDF/image/text filtering,
+  Save writes then opens the iOS share sheet (Save to Files, share, …),
+  folder pickers, OCR (models bundled), app icon, Files-app integration,
+  1.3× touch pan with momentum.
+- **Known spike limitations:** folder access claims are held for the session;
+  debug (not release) builds, so slower than a final build would be; upstream
+  updates need re-porting.
 
 ### How the port works (for the curious)
 
