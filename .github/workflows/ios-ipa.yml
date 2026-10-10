@@ -92,9 +92,9 @@ jobs:
           </plist>
           EOF
           codesign --force --sign - ipa-staging/Payload/PdfCraft.app/PdfCraft || true
-          (cd ipa-staging && zip -qry ../PdfCraft-ios-v6.ipa Payload)
-          ls -la PdfCraft-ios-v6.ipa
+          (cd ipa-staging && zip -qry ../PdfCraft-ios-v7-0.5.0.ipa Payload)
+          ls -la PdfCraft-ios-v7-0.5.0.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-ios-v6.ipa
-          path: PdfCraft-ios-v6.ipa
+          name: PdfCraft-ios-v7-0.5.0.ipa
+          path: PdfCraft-ios-v7-0.5.0.ipa
