@@ -27,6 +27,10 @@ use objc2_ui_kit::{
 struct Shared {
     done: Option<Vec<PathBuf>>,
     waker: Option<Waker>,
+    /// When set, resolve to `<picked dir>/<name>` (save flow).
+    save_name: Option<String>,
+    /// Hold security-scoped access on picked (Open-mode) URLs.
+    hold_access: bool,
 }
 
 type SharedCell = std::sync::Arc<Mutex<Shared>>;
@@ -54,15 +58,32 @@ define_class!(
         ) {
             let key = self as *const Self as usize;
             if let Some(shared) = pending().lock().unwrap().remove(&key) {
+                let (hold, save) = {
+                    let s = shared.lock().unwrap();
+                    (s.hold_access, s.save_name.clone())
+                };
                 let mut paths = Vec::new();
                 for i in 0..urls.len() {
                     let url = urls.objectAtIndex(i);
+                    if hold {
+                        // Open-mode URLs live outside the sandbox: hold the
+                        // access claim for the session (spike limitation).
+                        let _ = url.startAccessingSecurityScopedResource();
+                    }
                     if let Some(ns) = url.path() {
                         let p = PathBuf::from(ns.to_string());
-                        if p.exists() {
+                        if hold || p.exists() {
                             paths.push(p);
                         }
                     }
+                }
+                if let Some(name) = save {
+                    // Save flow: destination dir + suggested name.
+                    paths = paths
+                        .into_iter()
+                        .take(1)
+                        .map(|d| d.join(super::uniquify(&d, &name)))
+                        .collect();
                 }
                 // Balance the manual retain from presentation.
                 unsafe { drop(Retained::<PickerDelegate>::from_raw(key as *mut PickerDelegate)) };
@@ -89,13 +110,17 @@ define_class!(
     }
 );
 
-/// Present an Import-mode picker (`public.item`: everything importable).
-/// Runs on the calling (UI) thread. On failure returns a reason slug which
-/// becomes a fake path, so the app surfaces it in its own "Couldn't read …"
-/// toast instead of failing silently (remote-debugging aid for sideloaded
-/// builds where we cannot see logs).
+/// Present a document picker. `doc_types` are UTIs (`public.item` for files,
+/// `public.folder` for folders). Runs on the calling (UI) thread. On failure
+/// returns a reason slug which becomes a fake path, so the app surfaces it in
+/// its own "Couldn't read …" toast instead of failing silently.
 #[allow(deprecated)]
-fn present_import(multiple: bool, shared: &SharedCell) -> Result<(), &'static str> {
+fn present(
+    doc_types: &[&str],
+    mode: UIDocumentPickerMode,
+    multiple: bool,
+    shared: &SharedCell,
+) -> Result<(), &'static str> {
     let Some(mtm) = MainThreadMarker::new() else {
         return Err("no-main-thread");
     };
@@ -128,11 +153,13 @@ fn present_import(multiple: bool, shared: &SharedCell) -> Result<(), &'static st
         None => return Err("no-root-vc"),
     };
     let types = NSMutableArray::<NSString>::new();
-    types.addObject(&NSString::from_str("public.item"));
+    for t in doc_types {
+        types.addObject(&NSString::from_str(t));
+    }
     let picker = UIDocumentPickerViewController::initWithDocumentTypes_inMode(
         UIDocumentPickerViewController::alloc(mtm),
         &types,
-        UIDocumentPickerMode::Import,
+        mode,
     );
     picker.setAllowsMultipleSelection(multiple);
     let delegate: Retained<PickerDelegate> = unsafe { msg_send![PickerDelegate::class(), new] };
@@ -181,19 +208,52 @@ impl PickFuture {
     }
 }
 
+fn new_shared() -> SharedCell {
+    std::sync::Arc::new(Mutex::new(Shared {
+        done: None,
+        waker: None,
+        save_name: None,
+        hold_access: false,
+    }))
+}
+
 /// Called synchronously on the UI thread. Presents the picker now and hands
 /// back a future the worker thread will drive to completion. A presentation
 /// failure resolves to a sentinel path so the app toasts the reason instead
 /// of failing silently.
 pub(super) fn pick_now(multiple: bool) -> PickFuture {
-    let shared: SharedCell = std::sync::Arc::new(Mutex::new(Shared {
-        done: None,
-        waker: None,
-    }));
-    match present_import(multiple, &shared) {
-        Ok(()) => PickFuture {
-            shared: Some(shared),
-        },
+    let shared = new_shared();
+    match present(&["public.item"], UIDocumentPickerMode::Import, multiple, &shared) {
+        Ok(()) => PickFuture { shared: Some(shared) },
+        Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
+    }
+}
+
+/// Folder picker (Open mode): destinations and library folders. Access is
+/// held for the session so later reads/writes succeed.
+pub(super) fn folder_now(multiple: bool) -> PickFuture {
+    let shared = new_shared();
+    {
+        let mut s = shared.lock().unwrap();
+        s.hold_access = true;
+    }
+    match present(&["public.folder"], UIDocumentPickerMode::Open, multiple, &shared) {
+        Ok(()) => PickFuture { shared: Some(shared) },
+        Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
+    }
+}
+
+/// Save flow: folder picker (Open mode) plus the suggested file name. The app
+/// writes the bytes itself afterwards under the held access claim.
+pub(super) fn save_now(name: String) -> PickFuture {
+    let shared = new_shared();
+    {
+        let mut s = shared.lock().unwrap();
+        s.hold_access = true;
+        s.save_name = Some(name);
+    }
+    match present(&["public.folder"], UIDocumentPickerMode::Open, false, &shared) {
+        Ok(()) => PickFuture { shared: Some(shared) },
         Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
 }

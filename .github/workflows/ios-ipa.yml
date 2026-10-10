@@ -100,9 +100,9 @@ jobs:
           sed -i '' "s/__VER__/$VER/g" ipa-staging/Payload/PdfCraft.app/Info.plist
           grep -A1 CFBundleShortVersionString ipa-staging/Payload/PdfCraft.app/Info.plist
           codesign --force --sign - ipa-staging/Payload/PdfCraft.app/PdfCraft || true
-          (cd ipa-staging && zip -qry ../PdfCraft-ios-v8.ipa Payload)
-          ls -la PdfCraft-ios-v8.ipa
+          (cd ipa-staging && zip -qry ../PdfCraft-ios-v9.ipa Payload)
+          ls -la PdfCraft-ios-v9.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-ios-v8.ipa
-          path: PdfCraft-ios-v8.ipa
+          name: PdfCraft-ios-v9.ipa
+          path: PdfCraft-ios-v9.ipa

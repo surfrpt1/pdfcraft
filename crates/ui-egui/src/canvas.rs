@@ -215,6 +215,17 @@ struct PageTex {
     tex: TextureHandle,
 }
 
+/// SPIKE-iOS: amplified touch-drag pan state. egui's own touch-drag pans 1:1
+/// with no multiplier, so on iOS the ScrollArea's touch-drag is disabled and
+/// panning is done manually here instead (see the document view).
+#[derive(Clone, Copy, Debug, Default)]
+struct TouchPan {
+    /// A finger is down (from touch events, mirroring `wheel_pager`).
+    finger_down: bool,
+    /// Fling velocity in points per second while coasting after lift-off.
+    velocity: egui::Vec2,
+}
+
 /// Retained RGBA texture accounting for automation and performance regressions. These
 /// surface bytes exclude driver overhead and temporary upload buffers; they are not RSS.
 #[derive(Clone, Copy, Debug, Default, serde::Serialize)]
@@ -306,6 +317,8 @@ pub struct DocView {
     shown: bool,
     /// Turns wheel input into page turns in single-page view.
     wheel: crate::wheel_pager::WheelPager,
+    /// SPIKE-iOS: amplified touch-drag pan state (see below).
+    touch_pan: TouchPan,
     pub(crate) auto_scroll: crate::autoscroll::AutoScroll,
     /// Pages selected in the organize grid or the Pages panel (0-based). Empty means "the current page".
     pub selected: BTreeSet<usize>,
@@ -493,6 +506,7 @@ impl DocView {
             zoom_anchor: None,
             shown: false,
             wheel: Default::default(),
+            touch_pan: Default::default(),
             auto_scroll: Default::default(),
             selected: BTreeSet::new(),
             select_anchor: None,
@@ -1792,6 +1806,11 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     };
 
     let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).scroll_source(egui::scroll_area::ScrollSource {
+        // SPIKE-iOS: touch-drag is panned manually below (amplified 1.3x with
+        // momentum); egui's own touch-drag is 1:1 with no multiplier.
+        #[cfg(target_os = "ios")]
+        drag: egui::scroll_area::DragScroll::Never,
+        #[cfg(not(target_os = "ios"))]
         drag: if middle_gesture {
             egui::scroll_area::DragScroll::Never
         } else if app.quick_tool == QuickTool::Hand {
@@ -1927,6 +1946,45 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             } else if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+        }
+        // SPIKE-iOS: manual touch-drag pan (the ScrollArea's own touch-drag is
+        // disabled above). Tracks finger state from touch events like
+        // `wheel_pager` does; 1.3x while dragging, exponential coast after.
+        #[cfg(target_os = "ios")]
+        if !hand && !middle_gesture {
+            const PAN_SPEED: f32 = 1.3;
+            const COAST_DECAY: f32 = 5.0;
+            ui.input(|i| {
+                for e in &i.events {
+                    if let egui::Event::Touch { phase, .. } = e {
+                        match phase {
+                            egui::TouchPhase::Start => {
+                                view.touch_pan.finger_down = true;
+                                view.touch_pan.velocity = egui::Vec2::ZERO;
+                            }
+                            egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                                view.touch_pan.finger_down = false;
+                            }
+                            egui::TouchPhase::Move => {}
+                        }
+                    }
+                }
+            });
+            let dt = ui.input(|i| i.unstable_dt).clamp(1.0 / 240.0, 0.1);
+            if view.touch_pan.finger_down && resp.dragged() {
+                let d = resp.drag_delta() * PAN_SPEED;
+                ui.scroll_with_delta(d);
+                view.touch_pan.velocity = d / dt;
+            } else if !view.touch_pan.finger_down {
+                let v = view.touch_pan.velocity;
+                if v.length() > 8.0 {
+                    let decay = (-COAST_DECAY * dt).exp();
+                    ui.scroll_with_delta(v * decay * dt);
+                    view.touch_pan.velocity = v * decay;
+                } else {
+                    view.touch_pan.velocity = egui::Vec2::ZERO;
+                }
             }
         }
         let origin = resp_rect.min - vec2(0.0, y_shift);

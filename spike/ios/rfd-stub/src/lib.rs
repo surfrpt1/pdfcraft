@@ -96,11 +96,41 @@ impl AsyncFileDialog {
     }
 
     pub fn pick_folder(self) -> impl Future<Output = Option<FileHandle>> {
-        async move { sandbox_fallback_dir().map(FileHandle::from_path) }
+        // NOTE: presents now (UI thread), like `pick_file`.
+        #[cfg(target_os = "ios")]
+        {
+            let fut = ios_impl::folder_now(false);
+            return async move {
+                fut.await
+                    .into_iter()
+                    .next()
+                    .map(FileHandle::from_path)
+            };
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            async move { sandbox_fallback_dir().map(FileHandle::from_path) }
+        }
     }
 
     pub fn pick_folders(self) -> impl Future<Output = Option<Vec<FileHandle>>> {
-        async move { sandbox_fallback_dir().map(|p| vec![FileHandle::from_path(p)]) }
+        // NOTE: presents now (UI thread), like `pick_file`.
+        #[cfg(target_os = "ios")]
+        {
+            let fut = ios_impl::folder_now(true);
+            return async move {
+                let paths = fut.await;
+                if paths.is_empty() {
+                    None
+                } else {
+                    Some(paths.into_iter().map(FileHandle::from_path).collect())
+                }
+            };
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            async move { sandbox_fallback_dir().map(|p| vec![FileHandle::from_path(p)]) }
+        }
     }
 
     pub fn pick_file_or_folder(self) -> impl Future<Output = Option<FileHandle>> {
@@ -114,11 +144,27 @@ impl AsyncFileDialog {
     }
 
     pub fn save_file(self) -> impl Future<Output = Option<FileHandle>> {
-        async move {
+        // NOTE: presents now (UI thread): folder picker, file name appended
+        // on resolve. Falls back to sandboxed Documents off-iOS.
+        #[cfg(target_os = "ios")]
+        {
             let name = take_name().unwrap_or_else(|| "document.pdf".to_string());
-            let mut path = sandbox_fallback_dir()?;
-            path.push(uniquify(&path, &name));
-            Some(FileHandle::from_path(path))
+            let fut = ios_impl::save_now(name);
+            return async move {
+                fut.await
+                    .into_iter()
+                    .next()
+                    .map(FileHandle::from_path)
+            };
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            async move {
+                let name = take_name().unwrap_or_else(|| "document.pdf".to_string());
+                let mut path = sandbox_fallback_dir()?;
+                path.push(uniquify(&path, &name));
+                Some(FileHandle::from_path(path))
+            }
         }
     }
 }
