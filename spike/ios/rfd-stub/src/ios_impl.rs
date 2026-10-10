@@ -243,7 +243,6 @@ pub(super) fn pick_now(multiple: bool) -> PickFuture {
         Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
 }
-}
 
 /// Folder picker (Open mode): destinations and library folders. Access is
 /// held for the session so later reads/writes succeed.
