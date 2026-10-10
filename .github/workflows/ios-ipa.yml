@@ -11,6 +11,8 @@ jobs:
         with:
           targets: aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
+      - name: Fetch OCR models
+        run: cargo xtask models && ls -la assets/models/
       - name: Build pdfcraft for iOS (debug)
         env:
           IPHONEOS_DEPLOYMENT_TARGET: '17.0'
@@ -32,6 +34,10 @@ jobs:
           sips -z 152 152 "$SRC" --out "$APP/AppIcon76x76@2x~ipad.png"
           sips -z 167 167 "$SRC" --out "$APP/AppIcon83.5x83.5@2x~ipad.png"
           cp "$SRC" "$APP/AppIcon-1024.png"
+          mkdir -p "$APP/models"
+          cp assets/models/*.rten "$APP/models/"
+          ls -la "$APP/models/"
+          VER=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
           cat > ipa-staging/Payload/PdfCraft.app/Info.plist <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,9 +52,9 @@ jobs:
             <key>CFBundleDisplayName</key>
             <string>PdfCraft</string>
             <key>CFBundleVersion</key>
-            <string>0.4.0</string>
+            <string>__VER__</string>
             <key>CFBundleShortVersionString</key>
-            <string>0.4.0</string>
+            <string>__VER__</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>MinimumOSVersion</key>
@@ -91,10 +97,12 @@ jobs:
           </dict>
           </plist>
           EOF
+          sed -i '' "s/__VER__/$VER/g" ipa-staging/Payload/PdfCraft.app/Info.plist
+          grep -A1 CFBundleShortVersionString ipa-staging/Payload/PdfCraft.app/Info.plist
           codesign --force --sign - ipa-staging/Payload/PdfCraft.app/PdfCraft || true
-          (cd ipa-staging && zip -qry ../PdfCraft-ios-v7-0.5.0.ipa Payload)
-          ls -la PdfCraft-ios-v7-0.5.0.ipa
+          (cd ipa-staging && zip -qry ../PdfCraft-ios-v8.ipa Payload)
+          ls -la PdfCraft-ios-v8.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-ios-v7-0.5.0.ipa
-          path: PdfCraft-ios-v7-0.5.0.ipa
+          name: PdfCraft-ios-v8.ipa
+          path: PdfCraft-ios-v8.ipa

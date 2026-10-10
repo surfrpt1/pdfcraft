@@ -1917,7 +1917,13 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         // The Hand tool pans: the content widget takes every drag, so scroll by its delta.
         if hand {
             if resp.dragged() {
-                ui.scroll_with_delta(resp.drag_delta());
+                // SPIKE-iOS: finger panning felt slow; amplify slightly. Only
+                // touch exists on iOS, so no desktop behavior changes.
+                #[cfg(target_os = "ios")]
+                let delta = resp.drag_delta() * 1.3;
+                #[cfg(not(target_os = "ios"))]
+                let delta = resp.drag_delta();
+                ui.scroll_with_delta(delta);
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             } else if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
