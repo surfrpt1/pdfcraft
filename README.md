@@ -33,6 +33,33 @@
   <a href="https://getartcraft.com/apps">All Crafting Apps</a>
 </p>
 
+> **📱 iPad/iPhone build (community experiment, this fork only):** sideloadable IPAs with a native Files picker, bundled OCR models, app icon and touch-tuned panning — see [iOS (iPad) sideload builds](#ios-ipad-sideload-builds) and the [releases page](../../releases). Not affiliated with the ArtCraft team.
+
+## iOS (iPad) sideload builds
+
+> Unofficial community experiment, built from upstream plus an iOS porting
+> spike (`spike/ios/`, `ios-spike`/`ios-ipa` workflows). If the ArtCraft team
+> ships official iOS support, use that instead.
+
+- **Download:** [releases](../../releases) (`PdfCraft-ios-*.ipa`, newest first).
+- **Install:** sideload with AltStore/Sideloadly using your Apple ID (free
+  7-day certificate). Bundle ID: `com.surfrpt1.pdfcraft`. Tested on iPad Air 5
+  via LiveContainer.
+- **Works:** full app, native Files import picker, folder/save pickers, OCR
+  (models bundled), saves visible in the Files app, app icon, 1.3× touch pan
+  with momentum.
+- **Known spike limitations:** file dialogs are bridged natively but folder
+  access claims are held for the session; debug (not release) builds, so
+  slower than a final build would be; upstream updates need re-porting.
+
+### How the port works (for the curious)
+
+Upstream compiles for `aarch64-apple-ios` except two crates: `rfd` (file
+dialogs — no iOS backend, stubbed with a `UIDocumentPickerViewController`
+bridge in `spike/ios/rfd-stub/`) and `glutin` (pulled in by eframe's `glow`
+fallback — dropped for iOS targets, Metal only). Linking needs an iOS 17+
+deployment target; the IPA is packaged on a GitHub mac runner.
+
 <br>
 
 <p align="center">
