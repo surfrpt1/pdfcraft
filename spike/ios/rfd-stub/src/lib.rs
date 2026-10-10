@@ -57,39 +57,41 @@ impl AsyncFileDialog {
     }
 
     pub fn pick_file(self) -> impl Future<Output = Option<FileHandle>> {
-        let multiple = false;
-        async move {
-            #[cfg(target_os = "ios")]
-            {
-                return ios_impl::pick_now(multiple)
-                    .await
+        // NOTE: `pick_now` must run HERE (UI thread at tap time), not inside
+        // the async block (which first polls on a worker thread).
+        #[cfg(target_os = "ios")]
+        {
+            let fut = ios_impl::pick_now(false);
+            return async move {
+                fut.await
                     .into_iter()
                     .next()
-                    .map(FileHandle::from_path);
-            }
-            #[cfg(not(target_os = "ios"))]
-            {
-                let _ = multiple;
-                None
-            }
+                    .map(FileHandle::from_path)
+            };
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            async move { None }
         }
     }
 
     pub fn pick_files(self) -> impl Future<Output = Option<Vec<FileHandle>>> {
-        async move {
-            #[cfg(target_os = "ios")]
-            {
-                let paths = ios_impl::pick_now(true).await;
+        // NOTE: same as `pick_file`: present now, await later.
+        #[cfg(target_os = "ios")]
+        {
+            let fut = ios_impl::pick_now(true);
+            return async move {
+                let paths = fut.await;
                 if paths.is_empty() {
                     None
                 } else {
                     Some(paths.into_iter().map(FileHandle::from_path).collect())
                 }
-            }
-            #[cfg(not(target_os = "ios"))]
-            {
-                None
-            }
+            };
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            async move { None }
         }
     }
 
