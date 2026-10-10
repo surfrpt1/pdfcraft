@@ -297,7 +297,7 @@ pub(super) fn folder_now(multiple: bool) -> PickFuture {
         let mut s = shared.lock().unwrap();
         s.hold_access = true;
     }
-    match present(&["public.folder"], UIDocumentPickerMode::Open, multiple, &shared) {
+    match present(&["public.folder".to_string()], UIDocumentPickerMode::Open, multiple, &shared) {
         Ok(()) => PickFuture { shared: Some(shared) },
         Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
@@ -312,7 +312,7 @@ pub(super) fn save_now(name: String) -> PickFuture {
         s.hold_access = true;
         s.save_name = Some(name);
     }
-    match present(&["public.folder"], UIDocumentPickerMode::Open, false, &shared) {
+    match present(&["public.folder".to_string()], UIDocumentPickerMode::Open, false, &shared) {
         Ok(()) => PickFuture { shared: Some(shared) },
         Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
