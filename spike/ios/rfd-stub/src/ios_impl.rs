@@ -68,7 +68,7 @@ define_class!(
                     if hold {
                         // Open-mode URLs live outside the sandbox: hold the
                         // access claim for the session (spike limitation).
-                        let _ = url.startAccessingSecurityScopedResource();
+                        let _ = unsafe { url.startAccessingSecurityScopedResource() };
                     }
                     if let Some(ns) = url.path() {
                         let p = PathBuf::from(ns.to_string());
@@ -201,6 +201,8 @@ impl PickFuture {
         let shared = std::sync::Arc::new(Mutex::new(Shared {
             done: Some(paths),
             waker: None,
+            save_name: None,
+            hold_access: false,
         }));
         Self {
             shared: Some(shared),

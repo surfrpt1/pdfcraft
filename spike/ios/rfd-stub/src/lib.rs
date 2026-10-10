@@ -237,12 +237,5 @@ fn sandbox_fallback_dir() -> Option<PathBuf> {
     Some(docs)
 }
 
-/// Shared state between the eagerly-presented picker and the future polled
-/// later on a worker thread.
-struct WaitShared {
-    done: Mutex<Option<Vec<PathBuf>>>,
-    waker: Mutex<Option<Waker>>,
-}
-
 #[cfg(target_os = "ios")]
 mod ios_impl;
