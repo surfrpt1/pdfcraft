@@ -382,6 +382,10 @@ impl PdfCraftApp {
         {
             let destination = match (target, path, &self.save_override) {
                 (_, _, Some(p)) => p.clone(),
+                // SPIKE-iOS: sandbox copies are invisible, so even Save asks
+                // where (folder picker + file name) instead of silently
+                // overwriting the copy.
+                #[cfg(not(target_os = "ios"))]
                 (SaveTarget::InPlace, Some(p), _) => p,
                 _ => {
                     let name = if name.to_ascii_lowercase().ends_with(".pdf") { name } else { format!("{name}.pdf") };
