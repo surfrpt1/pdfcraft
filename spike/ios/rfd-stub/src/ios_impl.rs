@@ -272,16 +272,11 @@ fn new_shared() -> SharedCell {
 /// failure resolves to a sentinel path so the app toasts the reason instead
 /// of failing silently.
 ///
-/// Files open IN PLACE (Open mode, access held for the session) rather than
-/// imported as sandbox copies, so plain Save writes back to where the file
-/// came from - matching desktop behavior.
+/// Files use Import mode (single tap picks, like the proven v5-v9 builds);
+/// the system copies picks into the sandbox. Save panels ask for a folder.
 pub(super) fn pick_now(multiple: bool, filters: Vec<String>) -> PickFuture {
     let shared = new_shared();
-    {
-        let mut s = shared.lock().unwrap();
-        s.hold_access = true;
-    }
-    match present(&utis_for_filters(&filters), UIDocumentPickerMode::Open, multiple, &shared) {
+    match present(&utis_for_filters(&filters), UIDocumentPickerMode::Import, multiple, &shared) {
         Ok(()) => PickFuture {
             shared: Some(shared),
         },
