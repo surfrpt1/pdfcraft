@@ -25,6 +25,13 @@ jobs:
           rm -rf ipa-staging PdfCraft-unsigned.ipa
           mkdir -p ipa-staging/Payload/PdfCraft.app
           cp "$BIN" ipa-staging/Payload/PdfCraft.app/PdfCraft
+          SRC=assets/app-icon/pdfcraft-1024.png
+          APP=ipa-staging/Payload/PdfCraft.app
+          sips -z 120 120 "$SRC" --out "$APP/AppIcon60x60@2x.png"
+          sips -z 180 180 "$SRC" --out "$APP/AppIcon60x60@3x.png"
+          sips -z 152 152 "$SRC" --out "$APP/AppIcon76x76@2x~ipad.png"
+          sips -z 167 167 "$SRC" --out "$APP/AppIcon83.5x83.5@2x~ipad.png"
+          cp "$SRC" "$APP/AppIcon-1024.png"
           cat > ipa-staging/Payload/PdfCraft.app/Info.plist <<'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,13 +76,25 @@ jobs:
             <true/>
             <key>LSSupportsOpeningDocumentsInPlace</key>
             <true/>
+            <key>CFBundleIcons</key>
+            <dict>
+              <key>CFBundlePrimaryIcon</key>
+              <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                  <string>AppIcon60x60</string>
+                  <string>AppIcon76x76</string>
+                  <string>AppIcon83.5x83.5</string>
+                </array>
+              </dict>
+            </dict>
           </dict>
           </plist>
           EOF
           codesign --force --sign - ipa-staging/Payload/PdfCraft.app/PdfCraft || true
-          (cd ipa-staging && zip -qry ../PdfCraft-ios-v5.ipa Payload)
-          ls -la PdfCraft-ios-v5.ipa
+          (cd ipa-staging && zip -qry ../PdfCraft-ios-v6.ipa Payload)
+          ls -la PdfCraft-ios-v6.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: PdfCraft-ios-v5.ipa
-          path: PdfCraft-ios-v5.ipa
+          name: PdfCraft-ios-v6.ipa
+          path: PdfCraft-ios-v6.ipa
