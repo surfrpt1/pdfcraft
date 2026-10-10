@@ -66,6 +66,7 @@ define_class!(
                     (s.hold_access, s.save_name.clone())
                 };
                 let mut paths = Vec::new();
+                let mut saw_no_path = false;
                 for i in 0..urls.len() {
                     let url = urls.objectAtIndex(i);
                     if hold {
@@ -73,12 +74,26 @@ define_class!(
                         // access claim for the session (spike limitation).
                         let _ = unsafe { url.startAccessingSecurityScopedResource() };
                     }
-                    if let Some(ns) = url.path() {
-                        let p = PathBuf::from(ns.to_string());
-                        if hold || p.exists() {
-                            paths.push(p);
+                    match url.path() {
+                        Some(ns) => {
+                            let p = PathBuf::from(ns.to_string());
+                            if hold || p.exists() {
+                                paths.push(p);
+                            }
                         }
+                        None => saw_no_path = true,
                     }
+                }
+                // Remote-debugging sentinels: the app toasts these as
+                // "Couldn't read …" so a silent drop becomes visible.
+                if urls.len() == 0 {
+                    paths.push(PathBuf::from("/__PICKER_EMPTY"));
+                } else if paths.is_empty() {
+                    paths.push(PathBuf::from(if saw_no_path {
+                        "/__PICKER_NOPATH"
+                    } else {
+                        "/__PICKER_ALL_MISSING"
+                    }));
                 }
                 if let Some(name) = save {
                     // Save flow: destination dir + suggested name.
