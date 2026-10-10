@@ -142,18 +142,17 @@ impl AsyncFileDialog {
     }
 
     pub fn save_file(self) -> impl Future<Output = Option<FileHandle>> {
-        // NOTE: presents now (UI thread): folder picker, file name appended
-        // on resolve. Falls back to sandboxed Documents off-iOS.
+        // iOS: write straight to sandboxed Documents (visible in Files); the
+        // app presents the share sheet afterwards for the real destination.
+        // Other targets keep the folder picker.
         #[cfg(target_os = "ios")]
         {
-            let name = take_name().unwrap_or_else(|| "document.pdf".to_string());
-            let fut = ios_impl::save_now(name);
-            return async move {
-                fut.await
-                    .into_iter()
-                    .next()
-                    .map(FileHandle::from_path)
-            };
+            async move {
+                let name = take_name().unwrap_or_else(|| "document.pdf".to_string());
+                let mut path = sandbox_fallback_dir()?;
+                path.push(uniquify(&path, &name));
+                Some(FileHandle::from_path(path))
+            }
         }
         #[cfg(not(target_os = "ios"))]
         {
@@ -237,3 +236,10 @@ fn sandbox_fallback_dir() -> Option<PathBuf> {
 
 #[cfg(target_os = "ios")]
 mod ios_impl;
+
+/// Present the iOS share sheet for an already-written file (call right after
+/// saving, on the UI thread). Returns false when no window is available.
+#[cfg(target_os = "ios")]
+pub fn ios_share_file(path: &Path) -> bool {
+    ios_impl::share_file(path)
+}

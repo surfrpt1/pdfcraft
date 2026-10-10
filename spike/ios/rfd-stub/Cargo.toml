@@ -22,5 +22,9 @@ objc2-ui-kit = { version = "0.3", features = [
     "UIDocumentPickerViewController",
     "UIApplication",
     "UIViewController",
+    "UIView",
     "UIWindow",
+    "UIActivityViewController",
+    "UIActivity",
+    "UIPopoverPresentationController",
 ] }

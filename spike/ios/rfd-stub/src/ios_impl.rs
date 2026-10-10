@@ -23,8 +23,8 @@ use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, ClassType, MainThreadMarker, MainThreadOnly};
 use objc2_foundation::{NSArray, NSMutableArray, NSObject, NSString, NSURL};
 use objc2_ui_kit::{
-    UIApplication, UIDocumentPickerDelegate, UIDocumentPickerMode,
-    UIDocumentPickerViewController, UIViewController, UIWindow,
+    UIActivityViewController, UIApplication, UIDocumentPickerDelegate, UIDocumentPickerMode,
+    UIDocumentPickerViewController, UIView, UIViewController, UIWindow,
 };
 
 struct Shared {
@@ -158,17 +158,9 @@ fn utis_for_filters(filters: &[String]) -> Vec<String> {
     out
 }
 
-/// Present a document picker. `doc_types` are UTIs (`public.item` for files,
-/// `public.folder` for folders). Runs on the calling (UI) thread. On failure
-/// returns a reason slug which becomes a fake path, so the app surfaces it in
-/// its own "Couldn't read …" toast instead of failing silently.
-#[allow(deprecated)]
-fn present(
-    doc_types: &[String],
-    mode: UIDocumentPickerMode,
-    multiple: bool,
-    shared: &SharedCell,
-) -> Result<(), &'static str> {
+/// The app's root view controller for presenting modal UI, with the same
+/// window fallback as the picker.
+fn find_root() -> Result<Retained<UIViewController>, &'static str> {
     let Some(mtm) = MainThreadMarker::new() else {
         return Err("no-main-thread");
     };
@@ -196,10 +188,24 @@ fn present(
             }
         }
     };
-    let root: Retained<UIViewController> = match window.rootViewController() {
-        Some(r) => r,
-        None => return Err("no-root-vc"),
-    };
+    window.rootViewController().ok_or("no-root-vc")
+}
+
+/// Present a document picker. `doc_types` are UTIs (`public.item` for files,
+/// `public.folder` for folders). Runs on the calling (UI) thread. On failure
+/// returns a reason slug which becomes a fake path, so the app surfaces it in
+/// its own "Couldn't read …" toast instead of failing silently.
+#[allow(deprecated)]
+fn present(
+    doc_types: &[String],
+    mode: UIDocumentPickerMode,
+    multiple: bool,
+    shared: &SharedCell,
+) -> Result<(), &'static str> {
+    if MainThreadMarker::new().is_none() {
+        return Err("no-main-thread");
+    }
+    let root = find_root()?;
     let types = NSMutableArray::<NSString>::new();
     for t in doc_types {
         types.addObject(&NSString::from_str(t));
@@ -311,4 +317,33 @@ pub(super) fn save_now(name: String) -> PickFuture {
         Ok(()) => PickFuture { shared: Some(shared) },
         Err(reason) => PickFuture::ready(vec![PathBuf::from(format!("/__PICKER_FAILED_{reason}"))]),
     }
+}
+
+/// Present the iOS share sheet for an already-written file. Must run on the
+/// UI thread (the app calls this right after saving). Returns false when
+/// there is no window; on iPad the sheet is anchored to the root view.
+pub(super) fn share_file(path: &std::path::Path) -> bool {
+    if MainThreadMarker::new().is_none() {
+        return false;
+    }
+    let Ok(root) = find_root() else {
+        return false;
+    };
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+    let items = NSMutableArray::<objc2::runtime::AnyObject>::new();
+    items.addObject(&url);
+    let sheet = unsafe {
+        UIActivityViewController::initWithActivityItems_applicationActivities(
+            UIActivityViewController::alloc(),
+            &items,
+            None,
+        )
+    };
+    if let Some(popover) = sheet.popoverPresentationController() {
+        let view: Retained<UIView> = root.view();
+        popover.setSourceView(&view);
+        popover.setSourceRect(view.bounds());
+    }
+    root.presentViewController_animated_completion(&sheet, true, None);
+    true
 }

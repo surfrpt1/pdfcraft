@@ -382,9 +382,9 @@ impl PdfCraftApp {
         {
             let destination = match (target, path, &self.save_override) {
                 (_, _, Some(p)) => p.clone(),
-                // SPIKE-iOS: sandbox copies are invisible, so even Save asks
-                // where (folder picker + file name) instead of silently
-                // overwriting the copy.
+                // SPIKE-iOS: sandbox copies are invisible, so even Save goes
+                // through the save flow (Documents + share sheet) instead of
+                // silently overwriting the copy.
                 #[cfg(not(target_os = "ios"))]
                 (SaveTarget::InPlace, Some(p), _) => p,
                 _ => {
@@ -393,6 +393,10 @@ impl PdfCraftApp {
                     // The bytes are taken once the user has chosen, so edits made meanwhile are saved too.
                     self.ask_one(crate::pickers::Ask::Save(dialog), None, move |app, dest| {
                         if app.save_doc_to(id, &dest.to_string_lossy()) {
+                            // SPIKE-iOS: offer the real destination (Save to
+                            // Files, share, …) for the just-written file.
+                            #[cfg(target_os = "ios")]
+                            rfd::ios_share_file(&dest);
                             after(app);
                         }
                     });
