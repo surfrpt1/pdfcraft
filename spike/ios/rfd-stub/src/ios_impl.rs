@@ -202,9 +202,9 @@ fn present(
     multiple: bool,
     shared: &SharedCell,
 ) -> Result<(), &'static str> {
-    if MainThreadMarker::new().is_none() {
+    let Some(mtm) = MainThreadMarker::new() else {
         return Err("no-main-thread");
-    }
+    };
     let root = find_root()?;
     let types = NSMutableArray::<NSString>::new();
     for t in doc_types {
@@ -323,9 +323,9 @@ pub(super) fn save_now(name: String) -> PickFuture {
 /// UI thread (the app calls this right after saving). Returns false when
 /// there is no window; on iPad the sheet is anchored to the root view.
 pub(super) fn share_file(path: &std::path::Path) -> bool {
-    if MainThreadMarker::new().is_none() {
+    let Some(mtm) = MainThreadMarker::new() else {
         return false;
-    }
+    };
     let Ok(root) = find_root() else {
         return false;
     };
@@ -334,14 +334,16 @@ pub(super) fn share_file(path: &std::path::Path) -> bool {
     items.addObject(&url);
     let sheet = unsafe {
         UIActivityViewController::initWithActivityItems_applicationActivities(
-            UIActivityViewController::alloc(),
+            UIActivityViewController::alloc(mtm),
             &items,
             None,
         )
     };
     if let Some(popover) = sheet.popoverPresentationController() {
-        let view: Retained<UIView> = root.view();
-        popover.setSourceView(&view);
+        let Some(view) = root.view() else {
+            return false;
+        };
+        popover.setSourceView(Some(&view));
         popover.setSourceRect(view.bounds());
     }
     root.presentViewController_animated_completion(&sheet, true, None);
