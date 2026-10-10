@@ -173,6 +173,10 @@ fn main() -> eframe::Result {
     let apple_events = apple_events::AppleEvents::install();
     // Set once the app is created, which is after the renderer has started.
     let started = Rc::new(Cell::new(false));
+    // SPIKE-iOS: no OpenGL fallback on iOS (glutin has no iOS backend).
+    #[cfg(target_os = "ios")]
+    let first = eframe::Renderer::Wgpu;
+    #[cfg(not(target_os = "ios"))]
     let first = if choice == RendererChoice::Gl { eframe::Renderer::Glow } else { eframe::Renderer::Wgpu };
     let result = eframe::run_native(
         "PdfCraft",
@@ -187,6 +191,8 @@ fn main() -> eframe::Result {
     match result {
         // Only a renderer that couldn't start: without a window or display at all, OpenGL can't
         // help either, and winit's own error says more.
+        // SPIKE-iOS: no OpenGL retry on iOS.
+        #[cfg(not(target_os = "ios"))]
         Err(e @ eframe::Error::Wgpu(_)) if retry_with_gl(choice, started.get()) => {
             // Old or unusual GPUs and drivers (#461, #435, #392) can't give wgpu a device; OpenGL
             // usually still works there, so that's better than quitting.
