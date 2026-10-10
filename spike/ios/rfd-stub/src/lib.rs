@@ -19,21 +19,21 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-/// Builder for an async file dialog. Settings are accepted; on iOS only the
-/// choice of `pick_*` decides what happens.
+/// Builder for an async file dialog. File-type filters are collected and, on
+/// iOS, become the picker's document types.
 #[derive(Debug, Clone, Default)]
-pub struct AsyncFileDialog;
+pub struct AsyncFileDialog {
+    filters: Vec<String>,
+}
 
 impl AsyncFileDialog {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
-    pub fn add_filter(
-        self,
-        _name: impl Into<String>,
-        _extensions: &[impl ToString],
-    ) -> Self {
+    pub fn add_filter(mut self, _name: impl Into<String>, extensions: &[impl ToString]) -> Self {
+        self.filters
+            .extend(extensions.iter().map(|e| e.to_string().to_ascii_lowercase()));
         self
     }
 
@@ -59,7 +59,7 @@ impl AsyncFileDialog {
         // the async block (which first polls on a worker thread).
         #[cfg(target_os = "ios")]
         {
-            let fut = ios_impl::pick_now(false);
+            let fut = ios_impl::pick_now(false, self.filters);
             return async move {
                 fut.await
                     .into_iter()
@@ -77,7 +77,7 @@ impl AsyncFileDialog {
         // NOTE: same as `pick_file`: present now, await later.
         #[cfg(target_os = "ios")]
         {
-            let fut = ios_impl::pick_now(true);
+            let fut = ios_impl::pick_now(true, self.filters);
             return async move {
                 let paths = fut.await;
                 if paths.is_empty() {

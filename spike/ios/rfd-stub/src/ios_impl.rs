@@ -128,13 +128,43 @@ define_class!(
     }
 );
 
+/// Extension → UTI for the picker. Unknown types fall back to `public.item`
+/// (everything) so no file the app could convert is ever hidden.
+fn uti_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "pdf" => "com.adobe.pdf",
+        "png" => "public.png",
+        "jpg" | "jpeg" => "public.jpeg",
+        "gif" => "com.compuserve.gif",
+        "tif" | "tiff" => "public.tiff",
+        "bmp" => "com.microsoft.bmp",
+        "webp" => "org.webmproject.webp",
+        "svg" => "public.svg-image",
+        "txt" | "text" | "md" | "markdown" => "public.plain-text",
+        "html" | "htm" => "public.html",
+        "csv" => "public.comma-separated-values-text",
+        "rtf" => "public.rtf",
+        _ => "public.item",
+    }
+}
+
+fn utis_for_filters(filters: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = filters.iter().map(|e| uti_for_ext(e).to_string()).collect();
+    out.sort();
+    out.dedup();
+    if out.is_empty() {
+        out.push("public.item".to_string());
+    }
+    out
+}
+
 /// Present a document picker. `doc_types` are UTIs (`public.item` for files,
 /// `public.folder` for folders). Runs on the calling (UI) thread. On failure
 /// returns a reason slug which becomes a fake path, so the app surfaces it in
 /// its own "Couldn't read …" toast instead of failing silently.
 #[allow(deprecated)]
 fn present(
-    doc_types: &[&str],
+    doc_types: &[String],
     mode: UIDocumentPickerMode,
     multiple: bool,
     shared: &SharedCell,
@@ -245,13 +275,13 @@ fn new_shared() -> SharedCell {
 /// Files open IN PLACE (Open mode, access held for the session) rather than
 /// imported as sandbox copies, so plain Save writes back to where the file
 /// came from - matching desktop behavior.
-pub(super) fn pick_now(multiple: bool) -> PickFuture {
+pub(super) fn pick_now(multiple: bool, filters: Vec<String>) -> PickFuture {
     let shared = new_shared();
     {
         let mut s = shared.lock().unwrap();
         s.hold_access = true;
     }
-    match present(&["public.item"], UIDocumentPickerMode::Open, multiple, &shared) {
+    match present(&utis_for_filters(&filters), UIDocumentPickerMode::Open, multiple, &shared) {
         Ok(()) => PickFuture {
             shared: Some(shared),
         },
